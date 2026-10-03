@@ -14,7 +14,7 @@
   <header class="glass top">
     <div class="brand"><span class="logo">◈</span><div><h1>Signal Glass</h1><p>US swing jelzések · élő dashboard</p></div></div>
     <div class="status">
-      <nav class="tabs"><button class="tab on" data-view="dash">Dashboard</button><button class="tab" data-view="bt">Backtest</button></nav>
+      <nav class="tabs"><button class="tab on" data-view="dash">Dashboard</button><button class="tab" data-view="bt">Backtest</button><button class="tab" data-view="rs">Kutatás</button></nav>
       <span class="pill" id="market"><i class="dot"></i><b>–</b></span>
       <span class="pill" id="conn"><i class="dot"></i><b>kapcsolódás…</b></span>
       <span class="muted small" id="updated"></span>
@@ -85,6 +85,24 @@
     </div>
   </section>
   <div id="bt-body"><div class="glass empty">Nyomd meg a Futtatás gombot. Az első futás ~10 mp, utána gyorsítótárból jön.</div></div>
+</div>
+
+<div id="view-rs" hidden>
+  <section class="glass btctl">
+    <div>
+      <h2>Kutatás: valódi előny keresése</h2>
+      <p class="muted small">Három vizsgálat az S&amp;P 500 ~500 részvényén, 8 év adaton: ① melyik jelzésnek van előrejelző ereje, ② a stratégia a teljes univerzumon, ③ walk-forward (görgetett újratanítás, csak a soha nem látott időszakot mérjük).</p>
+    </div>
+    <div class="inline" style="align-items:center">
+      <span class="muted small" id="rs-gen"></span>
+      <button class="btn" id="rs-run">Futtatás</button>
+    </div>
+  </section>
+  <section class="glass" id="rs-prog" style="padding:16px 22px" hidden>
+    <div class="row" style="display:flex;justify-content:space-between;margin-bottom:8px"><span id="rs-msg">…</span><b id="rs-pct">0%</b></div>
+    <div class="gauge" style="margin:0"><i id="rs-bar" style="width:0%"></i></div>
+  </section>
+  <div id="rs-body"><div class="glass empty">Még nincs kutatási eredmény. Nyomd meg a Futtatás gombot (első alkalommal ~1–3 perc, a letöltés miatt).</div></div>
 </div>
 
   <footer class="muted small">Az adatok oktatási célúak, nem pénzügyi tanácsadás. Az ingyenes forrás késhet; a jelzések szabályalapú swing-pontozásból jönnek.</footer>

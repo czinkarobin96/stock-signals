@@ -2,3 +2,6 @@
 __pycache__/
 data/*.db
 .env
+data/prices/
+data/research.json
+data/sp500.json

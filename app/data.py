@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import yfinance as yf
 
+from . import yflock
 from .indicators import enrich
 
 warnings.filterwarnings("ignore")
@@ -36,10 +37,11 @@ def quotes(symbols: List[str]) -> Dict[str, dict]:
     if not symbols:
         return out
     try:
-        raw = yf.download(
-            symbols, period="5d", interval="5m", group_by="ticker",
-            progress=False, threads=True, auto_adjust=True, prepost=True,
-        )
+        with yflock.lock:
+            raw = yf.download(
+                symbols, period="5d", interval="5m", group_by="ticker",
+                progress=False, threads=True, auto_adjust=True, prepost=True,
+            )
     except Exception:
         raw = None
     for s in symbols:

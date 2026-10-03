@@ -146,7 +146,7 @@ select{background:rgba(255,255,255,.08);border:1px solid var(--border);color:var
 select option{background:#141b3a}
 .verdict{padding:16px 20px;display:flex;gap:14px;align-items:flex-start;border-left:4px solid var(--warn)}
 .verdict.good{border-left-color:var(--up)}.verdict.bad{border-left-color:var(--down)}
-.verdict b{display:block;margin-bottom:2px}
+.verdict>div>b{display:block;margin-bottom:2px}
 .btgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .btsec{padding:16px 20px}
 .btsec h3{font-size:13px;color:var(--muted);font-weight:500;margin-bottom:10px;display:flex;justify-content:space-between}
@@ -164,3 +164,24 @@ select option{background:#141b3a}
 @media(max-width:1100px){.btgrid,.btcols{grid-template-columns:1fr}}
 .sw{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .legend .l:before{display:none}.legend .l{padding-left:0}
+
+/* ---- research ---- */
+#view-rs{display:flex;flex-direction:column;gap:20px}
+#rs-body{display:flex;flex-direction:column;gap:20px}
+.rsec{padding:18px 20px}
+.rsec .lead{color:var(--muted);font-size:13.5px;margin:-6px 0 14px;max-width:900px}
+.seg{display:inline-flex;gap:4px;padding:3px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--border)}
+.seg button{background:none;border:0;color:var(--muted);padding:4px 12px;border-radius:99px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.seg button.on{background:rgba(139,140,255,.45);color:#fff}
+.tbar{display:inline-block;height:6px;border-radius:3px;vertical-align:middle;margin-left:8px;min-width:2px}
+.chip{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600;border:1px solid var(--border);color:var(--muted)}
+.chip.positive{background:rgba(52,211,153,.18);color:var(--up);border-color:rgba(52,211,153,.4)}
+.chip.negative{background:rgba(248,113,113,.18);color:var(--down);border-color:rgba(248,113,113,.45)}
+.chip.unstable{background:rgba(251,191,36,.16);color:var(--warn);border-color:rgba(251,191,36,.4)}
+.chip.live{background:rgba(139,140,255,.18);color:#c3c4ff;border-color:rgba(139,140,255,.4)}
+.chip.new{background:rgba(240,80,154,.16);color:#f9a8d4;border-color:rgba(240,80,154,.4)}
+.rs-chart{height:320px;border-radius:14px;overflow:hidden}
+.kpi4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:900px){.kpi4{grid-template-columns:repeat(2,1fr)}}
+
+#ftab-wrap{max-height:620px}

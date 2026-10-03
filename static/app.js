@@ -116,10 +116,23 @@ function renderSignal() {
 }
 
 // ---------- chart ----------
+// lightweight-charts' autoSize throws on display:none containers (tab switches),
+// so size charts ourselves and skip zero-size observations.
+function makeChart(el, opts) {
+  const c = LightweightCharts.createChart(el, { ...opts, width: el.clientWidth || 600, height: el.clientHeight || 320 });
+  const ro = new ResizeObserver(() => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (w > 0 && h > 0) c.resize(w, h);
+  });
+  ro.observe(el);
+  const remove = c.remove.bind(c);
+  c.remove = () => { ro.disconnect(); remove(); };
+  return c;
+}
+
 function initChart() {
   const el = $("#chart");
-  chart = LightweightCharts.createChart(el, {
-    autoSize: true,
+  chart = makeChart(el, {
     layout: { background: { color: "transparent" }, textColor: "#9aa4c7", fontFamily: "inherit" },
     grid: { vertLines: { color: "rgba(255,255,255,.05)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,.12)" },
@@ -155,8 +168,8 @@ async function loadChart(sym) {
   ];
   chart.timeScale().fitContent();
   // the container may still be laying out on first load; refit once it settles
-  requestAnimationFrame(() => chart.timeScale().fitContent());
-  setTimeout(() => chart.timeScale().fitContent(), 300);
+  const fit = () => { if ($("#chart").isConnected) chart.timeScale().fitContent(); };
+  requestAnimationFrame(fit); setTimeout(fit, 300);
   loadedChart = sym;
 }
 
@@ -211,8 +224,8 @@ let btChart = null, btSeries = {};
 
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === b));
-  $("#view-dash").hidden = b.dataset.view !== "dash";
-  $("#view-bt").hidden = b.dataset.view !== "bt";
+  for (const v of ["dash", "bt", "rs"]) $("#view-" + v).hidden = b.dataset.view !== v;
+  if (b.dataset.view === "rs") rsInit();
   if (b.dataset.view === "dash" && chart) setTimeout(() => chart.timeScale().fitContent(), 50);
 }));
 $("#bt-run").addEventListener("click", runBacktest);
@@ -289,8 +302,7 @@ function renderBacktest(r) {
 
 function drawEquity(c) {
   if (btChart) { btChart.remove(); btChart = null; }
-  btChart = LightweightCharts.createChart($("#bt-chart"), {
-    autoSize: true,
+  btChart = makeChart($("#bt-chart"), {
     layout: { background: { color: "transparent" }, textColor: "#9aa4c7", fontFamily: "inherit" },
     grid: { vertLines: { color: "rgba(255,255,255,.05)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,.12)" }, timeScale: { borderColor: "rgba(255,255,255,.12)" },
@@ -298,8 +310,8 @@ function drawEquity(c) {
   const add = (data, color, w) => { const s = btChart.addLineSeries({ color, lineWidth: w, priceLineVisible: false }); s.setData(data); return s; };
   add(c.buyhold, "#fbbf24", 1); if (c.spy.length) add(c.spy, "#9aa4c7", 1); add(c.strategy, "#8b8cff", 3);
   btChart.timeScale().fitContent();
-  requestAnimationFrame(() => btChart.timeScale().fitContent());
-  setTimeout(() => btChart && btChart.timeScale().fitContent(), 300);
+  const mine = btChart, fit = () => { if (btChart === mine) mine.timeScale().fitContent(); };
+  requestAnimationFrame(fit); setTimeout(fit, 300);
 }
 
 async function loadSweep(yrs) {
@@ -311,4 +323,114 @@ async function loadSweep(yrs) {
       ${rows.map((x) => `<tr style="cursor:default"><td class="sym">≥ ${x.threshold}</td><td class="r">${x.all.trades.n}</td><td class="r">${f1(x.all.trades.win_rate)}</td><td class="r">${f2(x.all.trades.profit_factor)}</td><td class="r ${cls(x.all.equity.total)}">${f1(x.all.equity.total)}</td><td class="r down">${f1(x.all.equity.maxdd)}</td><td class="r">${f2(x.all.equity.sharpe)}</td><td class="r"><b>${f2(x.out_of_sample.trades.profit_factor)}</b></td><td class="r ${cls(x.out_of_sample.equity.total)}">${f1(x.out_of_sample.equity.total)}</td></tr>`).join("")}
       </tbody></table></div>`;
   } catch (e) { /* non-critical */ }
+}
+
+// ================= RESEARCH =================
+let rsPoll = null, rsData = null, rsH = "10", rsCharts = [];
+
+function rsInit() {
+  if (rsData || rsPoll) return;
+  rsStatus(true);
+}
+$("#rs-run").addEventListener("click", async () => {
+  const r = await fetch("/api/research/start", { method: "POST" });
+  if (!(await r.json()).started) toast("Már fut egy kutatás", true);
+  rsStatus(false);
+});
+
+async function rsStatus(full) {
+  clearTimeout(rsPoll); rsPoll = null;
+  try {
+    const s = await (await fetch(`/api/research/status?full=${full}`)).json();
+    const prog = $("#rs-prog");
+    if (s.status === "running") {
+      prog.hidden = false; $("#rs-run").disabled = true;
+      $("#rs-msg").textContent = s.message; $("#rs-pct").textContent = Math.round(s.progress * 100) + "%";
+      $("#rs-bar").style.width = s.progress * 100 + "%";
+      rsPoll = setTimeout(() => rsStatus(false), 1500);
+    } else if (s.status === "done") {
+      prog.hidden = true; $("#rs-run").disabled = false;
+      if (full || !rsData) {
+        const d = await (await fetch("/api/research/status?full=true")).json();
+        rsData = d.result; renderResearch();
+      } else { rsStatus(true); }
+    } else if (s.status === "error") {
+      prog.hidden = true; $("#rs-run").disabled = false; toast("Kutatás hiba: " + s.message, true);
+    }
+  } catch (e) { rsPoll = setTimeout(() => rsStatus(false), 3000); }
+}
+
+function lines(el, defs) {
+  const c = makeChart(el, {
+    layout: { background: { color: "transparent" }, textColor: "#9aa4c7", fontFamily: "inherit" },
+    grid: { vertLines: { color: "rgba(255,255,255,.05)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
+    rightPriceScale: { borderColor: "rgba(255,255,255,.12)" }, timeScale: { borderColor: "rgba(255,255,255,.12)" },
+  });
+  defs.forEach(([data, color, w]) => { if (!data || !data.length) return; const s = c.addLineSeries({ color, lineWidth: w, priceLineVisible: false }); s.setData(data); });
+  const fit = () => { if (!c.dead && el.isConnected) c.timeScale().fitContent(); };
+  fit(); requestAnimationFrame(fit); setTimeout(fit, 300);
+  rsCharts.push(c);
+}
+const legend = (items) => `<div class="legend">${items.map(([n, c]) => `<span class="l"><i class="sw" style="background:${c}"></i>${n}</span>`).join("")}</div>`;
+const bps = (n) => (n == null ? "–" : (n >= 0 ? "+" : "") + (n * 100).toFixed(2) + "%");
+
+function renderResearch() {
+  rsCharts.forEach((c) => { c.dead = true; c.remove(); }); rsCharts = [];
+  const d = rsData; if (!d) return;
+  $("#rs-gen").textContent = `${d.n_symbols} ticker · ${d.data_period[0]} → ${d.data_period[1]} · futtatva: ${d.generated}`;
+  const wf = d.walkforward, un = d.universe;
+  const t4 = un.thresholds.find((x) => x.threshold === 4);
+
+  // ---- overall verdict
+  const sel = wf.selected, bh = wf.buyhold;
+  const pf = sel.trades.profit_factor;
+  const posFactors = d.factors["10"].rows.filter((r) => r.verdict === "positive");
+  const liveEdge = posFactors.filter((r) => r.in_score).length, newEdge = posFactors.filter((r) => !r.in_score);
+  let kind = "bad", head = "Nincs bizonyított előny, ezzel a szabálykészlettel nem érdemes élesben kereskedni";
+  if (sel.equity.sharpe > bh.sharpe && sel.equity.total > 0 && (pf || 0) > 1.3) { kind = "good"; head = "A walk-forward alapján van előny, de tovább kell validálni"; }
+  else if (sel.equity.total > 0 && (pf || 0) > 1.15) { kind = ""; head = "Gyenge, de pozitív előny, még nem elég meggyőző"; }
+  const verdict = `<div class="glass verdict ${kind}"><div><b>${head}</b><span class="muted">
+    Walk-forward (soha nem látott időszakok, ${wf.n_folds} kör): a kiválasztott paraméterekkel <b>${f1(sel.equity.total)}</b> hozam, Sharpe ${f2(sel.equity.sharpe)}, profit factor ${f2(pf)}, max drawdown ${f1(sel.equity.maxdd)}; közben a passzív univerzum-tartás ${f1(bh.total)} (Sharpe ${f2(bh.sharpe)}), az SPY ${f1(wf.spy.total)}.
+    A ${wf.n_combos} paraméter-kombinációból ${wf.grid_span.n_positive} pozitív, ${wf.grid_span.n_beat_bh_sharpe} jobb Sharpe-ú a passzív tartásnál ugyanebben az időszakban.
+    Az egyedi tényezők közül statisztikailag megbízható (|t|≥2, mindkét félidőben azonos irány) előnye: ${posFactors.length ? posFactors.map((r) => esc(r.label)).join(", ") : "egynek sincs"} (10 napos horizont).
+    <br><i>Torzítások: a jelenlegi S&amp;P 500 tagok listáján túlélési torzítás van (a ma is bennlévő cégek utólag "nyertesek"), ezért a buy&hold itt a valóságosnál kedvezőbb. A többszörös tesztelés miatt a kis t-értékek (2–3) sem végleges bizonyíték.</i></span></div></div>`;
+
+  // ---- factors
+  const fh = d.factors;
+  const factorCard = `<div class="glass rsec"><div class="cardhead"><h2>① Tényezők: van-e előrejelző erejük?</h2>
+      <div class="seg" id="seg-h">${["5", "10", "20"].map((h) => `<button data-h="${h}" class="${h === rsH ? "on" : ""}">${h} napos hozam</button>`).join("")}</div></div>
+    <p class="lead">Minden jelzés után másnap nyitáson belépünk és N napig tartunk. A "többlet" a piac aznapi átlagához képesti hozam, így a trend (a piac felfelé tart) nem torzít. A t-érték ≥ 2 és két félidőben azonos irány kell a "van előny" minősítéshez.</p>
+    <div class="tablewrap" id="ftab-wrap"><table><thead><tr><th>Tényező</th><th class="r">Esemény</th><th class="r">Átl. hozam</th><th class="r">Többlet</th><th class="r">Nyerő</th><th>t-érték</th><th class="r">1. fél</th><th class="r">2. fél</th><th>Ítélet</th></tr></thead><tbody id="ftab"></tbody></table></div></div>`;
+
+  // ---- universe
+  const urows = un.thresholds.map((x) => `<tr style="cursor:default"><td class="sym">BUY ≥ ${x.threshold}</td><td class="r">${x.all.trades.n}</td><td class="r">${f1(x.all.trades.win_rate)}</td><td class="r">${f2(x.all.trades.profit_factor)}</td><td class="r ${cls(x.all.equity.total)}">${f1(x.all.equity.total)}</td><td class="r down">${f1(x.all.equity.maxdd)}</td><td class="r">${f2(x.all.equity.sharpe)}</td><td class="r">${f1(x.exposure)}</td><td class="r"><b>${f2(x.out_of_sample.trades.profit_factor)}</b></td><td class="r ${cls(x.out_of_sample.equity.total)}">${f1(x.out_of_sample.equity.total)}</td></tr>`).join("");
+  const years = Object.keys(un.yearly.strategy);
+  const yrow = (n, k) => `<tr style="cursor:default"><td class="sym">${n}</td>${years.map((y) => { const v = un.yearly[k][y]; return `<td class="r ${cls(v)}">${f1(v)}</td>`; }).join("")}</tr>`;
+  const uniCard = `<div class="glass rsec"><div class="cardhead"><h2>② Stratégia a teljes univerzumon (${un.n_symbols} részvény)</h2>${legend([["Stratégia (BUY≥4)", "#8b8cff"], ["Univerzum buy&hold", "#fbbf24"], ["SPY", "#9aa4c7"]])}</div>
+    <p class="lead">Egyenlő súlyú portfólió: minden részvény egy szeletet kap, ami pozíció nélkül készpénz. Időszak: ${un.period[0]} → ${un.period[1]}; kontroll-időszak: ${un.split_date} után.</p>
+    <div id="rs-uni-chart" class="rs-chart"></div>
+    <div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Szabály</th><th class="r">Ügylet</th><th class="r">Nyerő</th><th class="r">PF</th><th class="r">Hozam</th><th class="r">Max DD</th><th class="r">Sharpe</th><th class="r">Kitettség</th><th class="r">Kontroll PF</th><th class="r">Kontroll hozam</th></tr></thead><tbody>${urows}</tbody></table></div>
+    <div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Évenként</th>${years.map((y) => `<th class="r">${y}</th>`).join("")}</tr></thead><tbody>${yrow("Stratégia", "strategy")}${yrow("Buy&hold", "buyhold")}${yrow("SPY", "spy")}</tbody></table></div></div>`;
+
+  // ---- walk-forward
+  const kp = (t, e, extra = "") => `<div class="glass btsec"><h3><span>${t}</span></h3><div class="metrics">${metric("Hozam", f1(e.total), cls(e.total))}${metric("Sharpe", f2(e.sharpe))}${metric("Max DD", f1(e.maxdd), "down")}${metric("Évesített", f1(e.cagr), cls(e.cagr))}</div></div>`;
+  const frows = wf.folds.map((f, i) => `<tr style="cursor:default"><td>${i + 1}</td><td class="muted small">${f.test[0]} → ${f.test[1]}</td><td>küszöb ${f.params.thr} · stop ${f.params.stop_atr} · cél ${f.params.target_atr} ATR</td><td class="r">${f2(f.train_sharpe)}</td><td class="r ${cls(f.test_return)}">${f1(f.test_return)}</td><td class="r ${cls(f.default_return)}">${f1(f.default_return)}</td><td class="r ${cls(f.buyhold_return)}">${f1(f.buyhold_return)}</td></tr>`).join("");
+  const wfCard = `<div class="glass rsec"><div class="cardhead"><h2>③ Walk-forward (${wf.n_folds} kör)</h2>${legend([["Kiválasztott paraméterek", "#8b8cff"], ["Alapértelmezett (4/2/3)", "#34d399"], ["Univerzum buy&hold", "#fbbf24"], ["SPY", "#9aa4c7"]])}</div>
+    <p class="lead">Minden körben a ${Math.round(wf.train_bars / 252)} éves tanuló szakaszon kiválasztjuk a legjobb paramétereket (BUY-küszöb × stop × célár, ${wf.n_combos} kombináció), majd egy soha nem látott ${wf.test_bars / 21} hónapos szakaszon mérjük őket. A görbe csak ezekből a kontroll-szakaszokból áll (${wf.oos_period[0]} → ${wf.oos_period[1]} fedésben).</p>
+    <div class="kpi4">${kp("Kiválasztott", sel.equity)}${kp("Alapértelmezett 4/2/3", wf.default.equity)}${kp("Univerzum buy&hold", wf.buyhold)}${kp("SPY", wf.spy)}</div>
+    <div id="rs-wf-chart" class="rs-chart"></div>
+    <div class="tablewrap short" style="margin-top:14px"><table><thead><tr><th>#</th><th>Kontroll-szakasz</th><th>Kiválasztott paraméterek</th><th class="r">Tanuló Sharpe</th><th class="r">Kontroll hozam</th><th class="r">Alapért.</th><th class="r">Buy&amp;hold</th></tr></thead><tbody>${frows}</tbody></table></div></div>`;
+
+  $("#rs-body").innerHTML = verdict + factorCard + uniCard + wfCard;
+  renderFactorRows();
+  $("#seg-h").addEventListener("click", (e) => { const b = e.target.closest("[data-h]"); if (!b) return; rsH = b.dataset.h; document.querySelectorAll("#seg-h button").forEach((x) => x.classList.toggle("on", x === b)); renderFactorRows(); });
+  lines($("#rs-uni-chart"), [[un.curves.buyhold, "#fbbf24", 1], [un.curves.spy, "#9aa4c7", 1], [un.curves.strategy, "#8b8cff", 3]]);
+  lines($("#rs-wf-chart"), [[wf.curves.buyhold, "#fbbf24", 1], [wf.curves.spy, "#9aa4c7", 1], [wf.curves.default, "#34d399", 1], [wf.curves.selected, "#8b8cff", 3]]);
+}
+
+function renderFactorRows() {
+  const fh = rsData.factors[rsH], maxT = Math.max(...fh.rows.map((r) => Math.abs(r.t)), 3);
+  const verd = { positive: "Van előny", negative: "Káros jel", unstable: "Instabil", none: "Nincs bizonyíték" };
+  $("#ftab").innerHTML = `<tr style="cursor:default" class="muted"><td>Piaci átlag (alap)</td><td class="r">–</td><td class="r">${bps(fh.baseline.avg)}</td><td class="r">0</td><td class="r">${f1(fh.baseline.win_rate)}</td><td></td><td></td><td></td><td></td></tr>` +
+    fh.rows.map((r) => `<tr style="cursor:default"><td>${esc(r.label)} <span class="chip ${r.in_score ? "live" : "new"}">${r.in_score ? "pontszámban" : "új ötlet"}</span></td><td class="r">${r.n.toLocaleString("hu-HU")}</td><td class="r ${cls(r.avg)}">${bps(r.avg)}</td><td class="r ${cls(r.excess)}"><b>${bps(r.excess)}</b></td><td class="r">${f1(r.win_rate)}</td><td>${r.t.toFixed(1)}<i class="tbar" style="width:${Math.abs(r.t) / maxT * 70}px;background:${r.t >= 0 ? "var(--up)" : "var(--down)"}"></i></td><td class="r ${cls(r.half1)}">${bps(r.half1)}</td><td class="r ${cls(r.half2)}">${bps(r.half2)}</td><td><span class="chip ${r.verdict}">${verd[r.verdict]}</span></td></tr>`).join("");
 }

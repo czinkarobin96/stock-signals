@@ -14,6 +14,15 @@ Majd: http://localhost:8000
 - `app/signals.py` – swing-pontozás (BUY/WATCH/NEUTRAL/AVOID) + SELL/TAKE_PROFIT logika nyitott pozícióra
 - `app/data.py` – yfinance adatletöltés + cache (15 percenként napi bar, 15 mp-enként árfolyam)
 - `app/main.py` – FastAPI, REST + WebSocket (`/ws`) live push
+- `app/backtest.py` – referencia (lassú, élő kódot hívó) backtest a Backtest fülhöz
+- `app/vec.py` – vektorizált tényezők + numba szimulátor (a referenciával bájtra egyező ügyletlista, lásd `tests/test_parity.py`)
+- `app/universe.py` – S&P 500 lista + lemezes árgyorsítótár (`data/prices/`)
+- `app/research.py` – Kutatás fül: ① tényező-előny teszt, ② univerzum-backtest, ③ walk-forward
 - `static/` – dashboard (Lightweight Charts, vanilla JS)
 
 Az adatok oktatási célúak, nem pénzügyi tanácsadás.
+
+## Tesztek
+```bash
+.venv/bin/python tests/test_parity.py
+```

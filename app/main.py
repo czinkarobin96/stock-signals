@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backtest, data, db
+from . import backtest, data, db, research
 from .signals import exit_check, score
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +18,7 @@ NY = ZoneInfo("America/New_York")
 
 app = FastAPI(title="Stock Signals")
 db.init()
+research.load_saved()
 
 state: Dict = {"quotes": {}, "signals": {}, "updated": None}
 clients: List[WebSocket] = []
@@ -206,6 +207,20 @@ async def api_backtest_sweep(years: int = 5) -> list:
             "all": r["stats"]["all"], "out_of_sample": r["stats"]["out_of_sample"],
             "exposure": r["exposure"],
         })
+    return out
+
+
+@app.post("/api/research/start")
+def api_research_start(sample: Optional[int] = None) -> dict:
+    return {"started": research.start(sample)}
+
+
+@app.get("/api/research/status")
+def api_research_status(full: bool = True) -> dict:
+    j = research.JOB
+    out = {"status": j["status"], "progress": j["progress"], "message": j["message"]}
+    if full and j["status"] == "done":
+        out["result"] = j["result"]
     return out
 
 
