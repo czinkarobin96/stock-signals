@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backtest, data, db, research
+from . import backtest, data, db, picks, research
 from .signals import exit_check, score
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,12 +119,19 @@ async def loop() -> None:
         except Exception as e:  # keep the loop alive
             print("refresh error:", e)
         n += 1
+        if n % 240 == 0:  # hourly: refresh the recommendations when they are older than 6h
+            age = picks.load_saved()
+            if age is None or age > 6:
+                picks.start(all_symbols())
         await asyncio.sleep(QUOTE_INTERVAL)
 
 
 @app.on_event("startup")
 async def startup() -> None:
     asyncio.create_task(loop())
+    age = picks.load_saved()
+    if age is None or age > 12:
+        picks.start(all_symbols())
 
 
 @app.websocket("/ws")
@@ -208,6 +215,20 @@ async def api_backtest_sweep(years: int = 5) -> list:
             "exposure": r["exposure"],
         })
     return out
+
+
+@app.get("/api/picks")
+def api_picks() -> dict:
+    j = picks.PICKS
+    out = {"status": j["status"], "progress": j["progress"], "message": j["message"]}
+    if j["result"] is not None:
+        out["result"] = j["result"]
+    return out
+
+
+@app.post("/api/picks/refresh")
+def api_picks_refresh() -> dict:
+    return {"started": picks.start(all_symbols())}
 
 
 @app.post("/api/research/start")

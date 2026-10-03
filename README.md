@@ -18,6 +18,7 @@ Majd: http://localhost:8000
 - `app/vec.py` – vektorizált tényezők + numba szimulátor (a referenciával bájtra egyező ügyletlista, lásd `tests/test_parity.py`)
 - `app/universe.py` – S&P 500 lista + lemezes árgyorsítótár (`data/prices/`)
 - `app/research.py` – Kutatás fül: ① tényező-előny teszt, ② univerzum-backtest, ③ walk-forward
+- `app/picks.py` – Ajánlások fül: fix besorolás (erős trend / semleges / magas kockázat), történeti kimenetek, hozam-sáv, stop, pozícióméret, magyarázatok
 - `static/` – dashboard (Lightweight Charts, vanilla JS)
 
 Az adatok oktatási célúak, nem pénzügyi tanácsadás.
@@ -25,4 +26,5 @@ Az adatok oktatási célúak, nem pénzügyi tanácsadás.
 ## Tesztek
 ```bash
 .venv/bin/python tests/test_parity.py
+.venv/bin/python tests/test_picks.py
 ```

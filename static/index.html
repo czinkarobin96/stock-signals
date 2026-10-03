@@ -14,14 +14,19 @@
   <header class="glass top">
     <div class="brand"><span class="logo">◈</span><div><h1>Signal Glass</h1><p>US swing jelzések · élő dashboard</p></div></div>
     <div class="status">
-      <nav class="tabs"><button class="tab on" data-view="dash">Dashboard</button><button class="tab" data-view="bt">Backtest</button><button class="tab" data-view="rs">Kutatás</button></nav>
+      <nav class="tabs"><button class="tab on" data-view="pk">Ajánlások</button><button class="tab" data-view="dash">Dashboard</button><button class="tab" data-view="bt">Backtest</button><button class="tab" data-view="rs">Kutatás</button></nav>
       <span class="pill" id="market"><i class="dot"></i><b>–</b></span>
       <span class="pill" id="conn"><i class="dot"></i><b>kapcsolódás…</b></span>
       <span class="muted small" id="updated"></span>
     </div>
   </header>
 
-<div id="view-dash">
+<div id="view-pk">
+  <section class="glass hero" id="pk-hero"><div class="empty" style="grid-column:1/-1"><span class="spin"></span>Ajánlások betöltése…</div></section>
+  <div id="pk-body"></div>
+</div>
+
+<div id="view-dash" hidden>
   <section class="kpis">
     <div class="glass kpi"><span>Portfólió értéke</span><strong id="k-value">–</strong><em id="k-invested" class="muted"></em></div>
     <div class="glass kpi"><span>Összes P/L</span><strong id="k-pnl">–</strong><em id="k-pnlpct"></em></div>

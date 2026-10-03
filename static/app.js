@@ -151,7 +151,12 @@ function initChart() {
   series.lines = [];
 }
 
+function ensureChart() { if (!chart) initChart(); }
+
 async function loadChart(sym) {
+  // the dashboard may be hidden (recommendations are the landing tab): build/load the chart when it is shown
+  if ($("#view-dash").hidden) { loadedChart = null; return; }
+  ensureChart();
   $("#c-title").textContent = sym + " · napi chart";
   const r = await fetch(`/api/chart/${sym}`);
   if (!r.ok) return toast("Chart betöltése sikertelen", true);
@@ -214,7 +219,6 @@ $("#add-pos").addEventListener("submit", async (e) => {
   if (await api("POST", "/api/positions", body)) { f.reset(); toast("Pozíció rögzítve"); }
 });
 
-initChart();
 connect();
 
 // ================= BACKTEST =================
@@ -224,9 +228,14 @@ let btChart = null, btSeries = {};
 
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === b));
-  for (const v of ["dash", "bt", "rs"]) $("#view-" + v).hidden = b.dataset.view !== v;
+  for (const v of ["pk", "dash", "bt", "rs"]) $("#view-" + v).hidden = b.dataset.view !== v;
   if (b.dataset.view === "rs") rsInit();
-  if (b.dataset.view === "dash" && chart) setTimeout(() => chart.timeScale().fitContent(), 50);
+  if (b.dataset.view === "pk") pkInit();
+  if (b.dataset.view === "dash") {
+    ensureChart();
+    if (selected && loadedChart !== selected) loadChart(selected);
+    else setTimeout(() => chart.timeScale().fitContent(), 50);
+  }
 }));
 $("#bt-run").addEventListener("click", runBacktest);
 
@@ -434,3 +443,185 @@ function renderFactorRows() {
   $("#ftab").innerHTML = `<tr style="cursor:default" class="muted"><td>Piaci átlag (alap)</td><td class="r">–</td><td class="r">${bps(fh.baseline.avg)}</td><td class="r">0</td><td class="r">${f1(fh.baseline.win_rate)}</td><td></td><td></td><td></td><td></td></tr>` +
     fh.rows.map((r) => `<tr style="cursor:default"><td>${esc(r.label)} <span class="chip ${r.in_score ? "live" : "new"}">${r.in_score ? "pontszámban" : "új ötlet"}</span></td><td class="r">${r.n.toLocaleString("hu-HU")}</td><td class="r ${cls(r.avg)}">${bps(r.avg)}</td><td class="r ${cls(r.excess)}"><b>${bps(r.excess)}</b></td><td class="r">${f1(r.win_rate)}</td><td>${r.t.toFixed(1)}<i class="tbar" style="width:${Math.abs(r.t) / maxT * 70}px;background:${r.t >= 0 ? "var(--up)" : "var(--down)"}"></i></td><td class="r ${cls(r.half1)}">${bps(r.half1)}</td><td class="r ${cls(r.half2)}">${bps(r.half2)}</td><td><span class="chip ${r.verdict}">${verd[r.verdict]}</span></td></tr>`).join("");
 }
+
+// ================= RECOMMENDATIONS =================
+let pk = null, pkH = "126", pkPoll = null, pkScreen = { cat: "ALL", sector: "ALL", q: "", sort: "score", dir: -1, limit: 40 };
+const HLABEL = { "21": "1 hónap", "63": "3 hónap", "126": "6 hónap" };
+const HDAYS = { "21": 30, "63": 91, "126": 182 };
+const CAT = { TREND: ["Erős trend", "good"], NEUTRAL: ["Semleges", ""], RISK: ["Magas kockázat", "bad"] };
+let pkPortfolio = 0;
+try { pkPortfolio = +localStorage.getItem("pk_portfolio") || 0; } catch (e) { }
+
+function pkInit() { if (!pk && !pkPoll) pkLoad(); }
+
+async function pkLoad() {
+  clearTimeout(pkPoll); pkPoll = null;
+  try {
+    const d = await (await fetch("/api/picks")).json();
+    if (d.result) { pk = d.result; renderPicks(); }
+    if (d.status === "running") {
+      if (!pk) $("#pk-hero").innerHTML = `<div class="empty" style="grid-column:1/-1"><span class="spin"></span>${esc(d.message)} (${Math.round(d.progress * 100)}%) · első betöltésnél ~1–2 perc</div>`;
+      pkPoll = setTimeout(pkLoad, 2000);
+    } else if (d.status === "error") {
+      $("#pk-hero").innerHTML = `<div class="empty" style="grid-column:1/-1">Hiba: ${esc(d.message)}</div>`;
+    }
+  } catch (e) { pkPoll = setTimeout(pkLoad, 3000); }
+}
+
+const sgn = (x) => (x >= 0 ? "+" : "") + (x * 100).toFixed(0) + "%";
+const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const money = (n) => "$" + Math.round(n).toLocaleString("en-US");
+
+function confidence() {
+  const t = pk.history[pkH]?.TREND;
+  const sig = t && Math.abs(t.t) >= 2 && Math.sign(t.half1) === Math.sign(t.half2);
+  return sig ? { lvl: 2, name: "Közepes", t } : { lvl: 1, name: "Alacsony", t };
+}
+
+function renderPicks() {
+  const m = pk.market, c = confidence(), t = c.t;
+  const head = m.regime
+    ? `A piac emelkedő trendben van, a trendkövető jelöltek keresése indokolt`
+    : `A piac nem emelkedő trendben van, óvatosság: most nincs új „erős trend" jelölt`;
+  $("#pk-hero").innerHTML = `
+    <div>
+      <h2>${esc(head)}</h2>
+      <p class="sub">Az alábbiakban az S&amp;P 500 ${m.n} részvényéből azok szerepelnek, amelyek <b>most</b> a legerősebb, legkevésbé kockázatos trendben vannak, és azok, amelyeket jobb elkerülni. Adatok: ${esc(pk.date)} zárás.</p>
+      <div class="facts">
+        <div class="fact"><span>S&amp;P 500 (SPY) az EMA200-hoz képest</span><b class="${cls(m.spy_d200)}">${sgn(m.spy_d200)}</b></div>
+        <div class="fact"><span>Részvények az EMA200 felett</span><b>${(m.breadth * 100).toFixed(0)}%</b></div>
+        <div class="fact"><span>Erős trend jelölt</span><b class="up">${m.n_trend}</b></div>
+        <div class="fact"><span>Magas kockázat</span><b class="down">${m.n_risk}</b></div>
+      </div>
+      <div class="pfin"><label class="muted small" style="display:flex;align-items:center;gap:8px">Portfóliód összege ($) a pozícióméretekhez
+        <input id="pk-pf" type="number" min="0" step="100" placeholder="pl. 10000" value="${pkPortfolio || ""}"></label></div>
+    </div>
+    <div class="conf"><h3>Bizonyossági szint: ${c.name}</h3>
+      <div class="meter"><i class="on"></i><i class="${c.lvl >= 2 ? "on" : ""}"></i><i></i></div>
+      <p>${t ? `A múltban az „erős trend" csoport ${HLABEL[pkH]} alatt a piacnál átlagosan <b>${Math.abs(t.excess * 100).toFixed(1)}%-kal</b> ${t.excess >= 0 ? "jobban" : "rosszabbul"} teljesített (t=${t.t.toFixed(1)}), ami ${c.lvl >= 2 ? "statisztikailag megbízható" : "<b>nem megbízható</b> különbség"}. ` : ""}A jelölt tehát <b>nem garantált nyertes</b>: azt mutatja, hol a legkedvezőbb a kép, nem azt, hogy mi fog felmenni. A hozam-sávok a részvény saját ingadozásából számolt becslések, nem előrejelzések.</p>
+    </div>`;
+
+  const by = Object.fromEntries(pk.rows.map((r) => [r.symbol, r]));
+  const sel = (arr) => arr.map((s) => by[s]).filter(Boolean);
+  $("#pk-body").innerHTML = `
+    <section><div class="sechead"><div><h2>Mire érdemes figyelni most</h2>
+      <p>Erős trendben lévő, nem szélsőségesen ingadozó részvények, kockázattal korrigált momentum szerint rangsorolva, szektoronként legfeljebb 2. <b>Javasolt tartási idő: 3–6 hónap</b>: a vizsgálatunk szerint heti-napi horizonton semmilyen jelnek nincs előnye.</p></div>
+      <div class="seg" id="pk-h">${["21", "63", "126"].map((h) => `<button data-h="${h}" class="${h === pkH ? "on" : ""}">${HLABEL[h]}</button>`).join("")}</div></div>
+      <div class="cards" id="pk-top" style="margin-top:14px">${sel(pk.top).map((r) => card(r, false)).join("") || `<div class="glass empty" style="grid-column:1/-1">Jelenleg nincs a feltételeknek megfelelő jelölt.</div>`}</div></section>
+    <section><div class="sechead"><div><h2>Mibe ne fektess most</h2>
+      <p>Nincs emelkedő trend, gyenge relatív erő, gyakran mély esés után. Fontos: a múlt <b>nem</b> mutatta, hogy ezek biztosan rosszabbul teljesítenek, ez kockázati óvatosság: nincs mellettük trend, és nagyobb a hozamuk szórása.</p></div></div>
+      <div class="cards" id="pk-avoid" style="margin-top:14px">${sel(pk.avoid).map((r) => card(r, true)).join("")}</div></section>
+    <section class="glass rsec" id="pk-hist"></section>
+    <section class="glass rsec" id="pk-screen"></section>
+    <details class="glass"><summary>Hogyan készülnek ezek a számok? Mit tudunk és mit nem?</summary><div class="meth">
+      <div><b>Besorolás.</b> <i>Erős trend</i>: a piac (SPY) az EMA200 felett, a részvény az EMA200 felett és EMA50&gt;EMA200, a 6 és 12 hónapos (az utolsó hónapot kihagyó) hozama együtt legalább a 60. percentilisben van az S&amp;P 500-on belül. <i>Magas kockázat</i>: az ár az EMA200 alatt és a momentum a gyengébb 40%-ban. A küszöböket előre rögzítettem, nem utólag hangoltam.</div>
+      <div><b>Rangsor.</b> A jelöltek között a 12 hónapos hozam / éves volatilitás szerint rendezek (kockázattal korrigált erő), a spekulatív (&gt;70% éves volatilitású) papírokat a top listából kizárom. Ez észszerű heurisztika, de a múltbeli adaton külön nem validáltam.</div>
+      <div><b>Hozam-sáv.</b> Feltevés: hosszú távú piaci hozam ${(pk.assumptions.drift * 100).toFixed(0)}%/év, a szórás a részvény saját (60 és 252 napos) volatilitása, lognormális eloszlással. A „jó/rossz eset" a 90./10. percentilis. <b>Ez nem tartalmaz részvény-specifikus előrejelzést</b>, mert a vizsgálat nem talált megbízható előnyt.</div>
+      <div><b>Védő stop és pozícióméret.</b> Stop: ár − ${pk.assumptions.stop_atr}×ATR. Pozícióméret: a portfólió ${(pk.assumptions.risk_per_trade * 100).toFixed(0)}%-át kockáztatod a stoppig, legfeljebb ${(pk.assumptions.max_pos * 100).toFixed(0)}% egy részvényben.</div>
+      <div><b>Torzítások.</b> A lista a mai S&amp;P 500 tagjaiból áll (túlélési torzítás), a vizsgált időszak ${esc(pk.history_period[0])} – ${esc(pk.history_period[1])}, nagyrészt emelkedő piac. A fundamentumokat (eredmény, értékeltség), hírt, esedékes eredményjelentést <b>nem</b> vizsgálja. Ezeket vásárlás előtt magadnak kell ellenőrizned. Az oldal nem pénzügyi tanácsadás.</div>
+    </div></details>`;
+
+  $("#pk-pf").addEventListener("change", (e) => { pkPortfolio = +e.target.value || 0; try { localStorage.setItem("pk_portfolio", pkPortfolio); } catch (x) { } renderPicks(); });
+  $("#pk-h").addEventListener("click", (e) => { const b = e.target.closest("[data-h]"); if (b) { pkH = b.dataset.h; renderPicks(); } });
+  $("#pk-body").addEventListener("click", pkClick);
+  renderHistory(); renderScreener();
+}
+
+function card(r, risk) {
+  const o = r.outlook[pkH];
+  const lo = -0.6, hi = 1.0, pos = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+  const reasonsHtml = r.reasons.map((x, i) => `<li class="${x.k}${i >= 3 ? " more" : ""}">${esc(x.t)}</li>`).join("");
+  const bandHtml = risk ? "" : `
+    <div><div class="band"><div class="track"></div>
+      <div class="rng" style="left:${pos(o.lo)}%;width:${pos(o.hi) - pos(o.lo)}%"></div>
+      <div class="zero" style="left:${pos(0)}%"></div><div class="mid" style="left:${pos(o.mid)}%"></div>
+      <span class="lbl md" style="left:${pos(o.mid)}%">medián ≈ ${sgn(o.mid)}</span>
+      <span class="lbl lo" style="left:${Math.max(8, pos(o.lo))}%">${sgn(o.lo)}</span>
+      <span class="lbl hi" style="left:${Math.min(92, pos(o.hi))}%">${sgn(o.hi)}</span></div>
+      <div class="bandnote">${HLABEL[pkH]} alatt, 80%-os sáv (rossz ↔ jó eset). Esély a pozitív hozamra: <b>${(o.p_up * 100).toFixed(0)}%</b>${r.vol > 0.5 ? " · nagy ingadozásnál a medián az átlagos hozam alatt van (volatilitási veszteség)" : ""}</div></div>`;
+  const amount = pkPortfolio ? ` ≈ ${money(pkPortfolio * r.size_pct)} (${Math.floor((pkPortfolio * r.size_pct) / r.price)} db)` : "";
+  const hold = risk ? "" : `<div class="hold">
+      <div><span>Javasolt tartás</span><b>3–6 hónap</b></div>
+      <div><span>Felülvizsgálat</span><b>${addDays(pk.date, 182)}</b></div>
+      <div><span>Védő stop</span><b class="down">${usd(r.stop)} (${sgn(-r.stop_pct)})</b></div>
+      <div><span>Max. pozícióméret</span><b>${(r.size_pct * 100).toFixed(0)}%${amount}</b></div></div>
+    <div class="plan"><b>Kilépés:</b> EMA200 alá záráskor vagy ${usd(r.stop)} alatt; a stop 3×ATR-rel követi a csúcsot.</div>`;
+  const cat = CAT[r.cat];
+  return `<div class="glass pcard ${risk ? "risk" : ""}" data-s="${esc(r.symbol)}">
+    <div class="pc-top"><div><div class="pc-sym">${esc(r.symbol)}</div><div class="pc-name">${esc(r.name)}</div></div>
+      <div class="pc-price"><b>${usd(r.price)}</b><span class="${cls(r.chg)}">${sgn(r.chg)} ma</span></div></div>
+    <div class="tags"><span class="tag ${cat[1]}">${cat[0]}</span><span class="tag">${esc(r.sector)}</span>${r.spec ? '<span class="tag warn">spekulatív</span>' : ""}${r.ext && !risk ? '<span class="tag warn">felfűtött</span>' : ""}<span class="tag">vol ${(r.vol * 100).toFixed(0)}%/év</span></div>
+    ${bandHtml}${hold}
+    <ul class="rs">${reasonsHtml}</ul>
+    <div class="pc-actions">${r.reasons.length > 3 ? `<button class="btn sm line" data-act="more">Részletek</button>` : ""}
+      <button class="btn sm line" data-act="chart">Chart</button>${risk ? "" : `<button class="btn sm" data-act="bought">Megvettem</button>`}</div>
+  </div>`;
+}
+
+async function pkClick(e) {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const card = b.closest("[data-s]"), sym = card.dataset.s;
+  if (b.dataset.act === "more") { card.classList.toggle("open"); b.textContent = card.classList.contains("open") ? "Kevesebb" : "Részletek"; return; }
+  const r = pk.rows.find((x) => x.symbol === sym);
+  if (b.dataset.act === "chart") { await showOnDashboard(sym); return; }
+  if (b.dataset.act === "bought") {
+    if (!(await api("POST", "/api/watchlist", { symbol: sym }))) return;
+    document.querySelector('[data-view=dash]').click();
+    const f = $("#add-pos"); f.symbol.value = sym; f.entry_price.value = r.price.toFixed(2); f.qty.focus();
+    f.scrollIntoView({ behavior: "smooth", block: "center" });
+    toast(`${sym}: add meg a darabszámot, és rögzítsd a pozíciót`);
+  }
+}
+
+async function showOnDashboard(sym) {
+  if (!snap || !snap.watchlist.find((w) => w.symbol === sym)) { if (!(await api("POST", "/api/watchlist", { symbol: sym }))) return; }
+  document.querySelector('[data-view=dash]').click();
+  setTimeout(() => { loadedChart = null; selectSymbol(sym); }, 400);
+}
+
+function renderHistory() {
+  const H = pk.history[pkH]; if (!H) return;
+  const rows = [["ALL", "Teljes S&P 500 (viszonyítás)"], ["TREND", "Erős trend (jelölt)"], ["TREND_CLEAN", "ebből nem felfűtött"], ["TREND_HOT", "ebből felfűtött"], ["NEUTRAL", "Semleges"], ["RISK", "Magas kockázat"]];
+  const ver = (v) => { if (!v || v.t == null) return `<span class="chip">viszonyítás</span>`; const ok = Math.abs(v.t) >= 2 && Math.sign(v.half1) === Math.sign(v.half2); return ok ? `<span class="chip ${v.excess > 0 ? "positive" : "negative"}">${v.excess > 0 ? "jobb a piacnál" : "rosszabb a piacnál"}</span>` : `<span class="chip">nincs bizonyíték</span>`; };
+  const f = (x) => (x == null ? "–" : (x * 100).toFixed(1) + "%");
+  const tr = rows.filter(([k]) => H[k]).map(([k, label]) => { const v = H[k]; return `<tr style="cursor:default"><td>${label}</td><td class="r">${v.n.toLocaleString("hu-HU")}</td><td class="r"><b>${f(v.median)}</b></td><td class="r down">${f(v.p10)}</td><td class="r up">${f(v.p90)}</td><td class="r">${f(v.win)}</td><td class="r ${cls(v.excess)}">${v.excess == null ? "–" : (v.excess > 0 ? "+" : "") + f(v.excess)}</td><td class="r">${v.t == null ? "–" : v.t.toFixed(1)}</td><td>${ver(v)}</td></tr>`; }).join("");
+  const T = H.TREND, A = H.ALL, R = H.RISK, HOT = H.TREND_HOT;
+  const sig = T && Math.abs(T.t) >= 2;
+  const take = [
+    T && `Az <b>erős trend</b> jelöltek mediánja ${HLABEL[pkH]} alatt <b>${f(T.median)}</b>, a teljes S&amp;P 500-é ${f(A.median)}. A piachoz mért többlet ${(T.excess > 0 ? "+" : "") + f(T.excess)} (t=${T.t.toFixed(1)}): ${sig ? "statisztikailag kimutatható, de" : "<b>statisztikailag nem megbízható</b>,"} ezért a „jelölt" nem jelent bizonyított előnyt.`,
+    R && `A <b>magas kockázatú</b> csoport mediánja ${f(R.median)}, tehát a múltban <b>nem</b> maradt el a piactól. A „ne fektess" üzenet kockázatról szól (nincs trend, nagyobb szórás), nem biztos veszteségről.`,
+    HOT && `A <b>felfűtött</b> erős-trend papírok a múltban jobban szerepeltek (${(HOT.excess > 0 ? "+" : "") + f(HOT.excess)} többlet), de ez kevés, egymást átfedő eseményen és főleg a 2020–2026-os technológiai rali idején történt, ezért nem tekintem megbízható jelnek, és a „felfűtött" címke csak figyelmeztetés.`,
+    `A <b>10–90% sáv</b> mutatja, mekkora volt a valódi szórás: a kimenetelek 80%-a ${f(A.p10)} és ${f(A.p90)} közé esett ${HLABEL[pkH]} alatt, azaz bármelyik részvényre erős a bizonytalanság.`,
+  ].filter(Boolean).map((t) => `<div>${t}</div>`).join("");
+  $("#pk-hist").innerHTML = `<div class="cardhead"><h2>Mit mutat a múlt? Ugyanezek a szabályok az elmúlt években</h2><span class="muted small">${HLABEL[pkH]} tartás, ${esc(pk.history_period[0])} → ${esc(pk.history_period[1])}</span></div>
+    <p class="lead">Ez az ellenőrzés: ha a besorolás működne, a „jelölt" sor mediánja és nyerési aránya a „teljes S&amp;P 500" sor fölött lenne, megbízható t-értékkel (≥2, mindkét félidőben azonos irányban).</p>
+    <div class="tablewrap"><table class="hist"><thead><tr><th>Csoport</th><th class="r">Esemény</th><th class="r">Medián hozam</th><th class="r">Rossz eset (10%)</th><th class="r">Jó eset (90%)</th><th class="r">Pozitív</th><th class="r">Többlet</th><th class="r">t</th><th>Ítélet</th></tr></thead><tbody>${tr}</tbody></table></div>
+    <div class="takeaway">${take}</div>`;
+}
+
+function renderScreener() {
+  const S = pkScreen;
+  const sectors = [...new Set(pk.rows.map((r) => r.sector))].sort();
+  let rows = pk.rows.filter((r) => (S.cat === "ALL" || r.cat === S.cat) && (S.sector === "ALL" || r.sector === S.sector) &&
+    (!S.q || (r.symbol + " " + r.name).toLowerCase().includes(S.q.toLowerCase())));
+  const key = { score: (r) => r.score, mrank: (r) => r.mrank, m61: (r) => r.m61, vol: (r) => r.vol, p_up: (r) => r.outlook[pkH].p_up, price: (r) => r.price, symbol: (r) => r.symbol, dd52: (r) => r.dd52 }[S.sort];
+  rows.sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * S.dir);
+  const total = rows.length; rows = rows.slice(0, S.limit);
+  const th = (k, l, cl = "") => `<th class="sortable ${cl}" data-sort="${k}">${l}${S.sort === k ? (S.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
+  $("#pk-screen").innerHTML = `<div class="cardhead"><h2>Teljes lista (${total} részvény)</h2>
+    <div class="filters"><input id="sc-q" placeholder="Keresés…" value="${esc(S.q)}">
+      <select id="sc-cat"><option value="ALL">Minden kategória</option><option value="TREND" ${S.cat === "TREND" ? "selected" : ""}>Erős trend</option><option value="NEUTRAL" ${S.cat === "NEUTRAL" ? "selected" : ""}>Semleges</option><option value="RISK" ${S.cat === "RISK" ? "selected" : ""}>Magas kockázat</option></select>
+      <select id="sc-sec"><option value="ALL">Minden szektor</option>${sectors.map((x) => `<option ${S.sector === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div></div>
+    <div class="tablewrap" style="max-height:640px"><table><thead><tr>${th("symbol", "Ticker")}<th>Név</th><th>Kategória</th>${th("score", "Kock.korr. erő", "r")}${th("m61", "6 hó hozam", "r")}${th("vol", "Volatilitás", "r")}${th("p_up", "Esély + (" + HLABEL[pkH] + ")", "r")}${th("dd52", "Csúcstól", "r")}${th("price", "Ár", "r")}</tr></thead><tbody>
+    ${rows.map((r) => `<tr data-sym="${esc(r.symbol)}"><td class="sym">${esc(r.symbol)}</td><td class="muted small">${esc(r.name)}</td><td><span class="tag ${CAT[r.cat][1]}">${CAT[r.cat][0]}</span>${r.spec ? ' <span class="tag warn">spek.</span>' : ""}</td><td class="r">${r.score.toFixed(2)}</td><td class="r ${cls(r.m61)}">${sgn(r.m61)}</td><td class="r">${(r.vol * 100).toFixed(0)}%</td><td class="r">${(r.outlook[pkH].p_up * 100).toFixed(0)}%</td><td class="r ${cls(r.dd52)}">${sgn(r.dd52)}</td><td class="r">${usd(r.price)}</td></tr>`).join("")}
+    </tbody></table></div>${total > S.limit ? `<div style="text-align:center;margin-top:12px"><button class="btn line" id="sc-more">Még ${Math.min(40, total - S.limit)} megjelenítése</button></div>` : ""}`;
+  $("#sc-q").addEventListener("input", (e) => { S.q = e.target.value; S.limit = 40; renderScreener(); $("#sc-q").focus(); $("#sc-q").setSelectionRange(S.q.length, S.q.length); });
+  $("#sc-cat").addEventListener("change", (e) => { S.cat = e.target.value; S.limit = 40; renderScreener(); });
+  $("#sc-sec").addEventListener("change", (e) => { S.sector = e.target.value; S.limit = 40; renderScreener(); });
+  $("#sc-more")?.addEventListener("click", () => { S.limit += 40; renderScreener(); });
+  $("#pk-screen thead").addEventListener("click", (e) => { const t = e.target.closest("[data-sort]"); if (!t) return; if (S.sort === t.dataset.sort) S.dir *= -1; else { S.sort = t.dataset.sort; S.dir = -1; } renderScreener(); });
+  $("#pk-screen tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-sym]"); if (tr) showOnDashboard(tr.dataset.sym); });
+}
+
+// the recommendations are the landing page
+pkInit();

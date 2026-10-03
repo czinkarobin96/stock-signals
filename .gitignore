@@ -5,3 +5,5 @@ data/*.db
 data/prices/
 data/research.json
 data/sp500.json
+data/picks.json
+data/sp500_info.json

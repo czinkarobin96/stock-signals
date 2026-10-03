@@ -1,4 +1,5 @@
 """S&P 500 universe + on-disk price cache for research runs."""
+import html
 import json
 import re
 import time
@@ -97,3 +98,27 @@ def load_prices(symbols: List[str], years: int = 8,
                 except Exception:
                     pass
     return out
+
+
+def sp500_info() -> Dict[str, dict]:
+    """{symbol: {name, sector}} from the same Wikipedia table (cached a week)."""
+    f = DATA / "sp500_info.json"
+    if f.exists() and time.time() - f.stat().st_mtime < 7 * 86400:
+        return json.loads(f.read_text())
+    info: Dict[str, dict] = {}
+    try:
+        t = requests.get(WIKI, headers={"User-Agent": "Mozilla/5.0 stock-signals research"}, timeout=20).text
+        body = t[t.find(">MMM<") - 1500:]
+        for row in body.split("</tr>"):
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S)
+            if len(cells) < 3:
+                continue
+            txt = [re.sub(r"<[^>]+>", "", c).strip() for c in cells]
+            sym = txt[0].replace(".", "-")
+            if re.fullmatch(r"[A-Z][A-Z\-]{0,5}", sym):
+                info[sym] = {"name": html.unescape(txt[1]), "sector": html.unescape(txt[2])}
+        if len(info) > 400:
+            f.write_text(json.dumps(info))
+    except Exception:
+        pass
+    return info if info else (json.loads(f.read_text()) if f.exists() else {})
