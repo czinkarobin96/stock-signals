@@ -14,12 +14,14 @@
   <header class="glass top">
     <div class="brand"><span class="logo">◈</span><div><h1>Signal Glass</h1><p>US swing jelzések · élő dashboard</p></div></div>
     <div class="status">
+      <nav class="tabs"><button class="tab on" data-view="dash">Dashboard</button><button class="tab" data-view="bt">Backtest</button></nav>
       <span class="pill" id="market"><i class="dot"></i><b>–</b></span>
       <span class="pill" id="conn"><i class="dot"></i><b>kapcsolódás…</b></span>
       <span class="muted small" id="updated"></span>
     </div>
   </header>
 
+<div id="view-dash">
   <section class="kpis">
     <div class="glass kpi"><span>Portfólió értéke</span><strong id="k-value">–</strong><em id="k-invested" class="muted"></em></div>
     <div class="glass kpi"><span>Összes P/L</span><strong id="k-pnl">–</strong><em id="k-pnlpct"></em></div>
@@ -66,6 +68,24 @@
       <div id="positions"></div>
     </div>
   </section>
+</div>
+
+<div id="view-bt" hidden>
+  <section class="glass btctl">
+    <div>
+      <h2>Stratégia backtest</h2>
+      <p class="muted small" id="bt-sub">A jelenlegi szabályok futtatása historikus adaton: jelzés a záráson, belépés másnap nyitáson, stop/cél napon belül, 0,05% slippage.</p>
+    </div>
+    <div class="inline">
+      <label class="muted small">BUY-küszöb
+        <select id="bt-th"><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label class="muted small">Időtáv
+        <select id="bt-years"><option value="3">3 év</option><option value="5" selected>5 év</option></select></label>
+      <button class="btn" id="bt-run">Futtatás</button>
+    </div>
+  </section>
+  <div id="bt-body"><div class="glass empty">Nyomd meg a Futtatás gombot. Az első futás ~10 mp, utána gyorsítótárból jön.</div></div>
+</div>
 
   <footer class="muted small">Az adatok oktatási célúak, nem pénzügyi tanácsadás. Az ingyenes forrás késhet; a jelzések szabályalapú swing-pontozásból jönnek.</footer>
 </main>

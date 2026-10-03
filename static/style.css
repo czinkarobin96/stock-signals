@@ -132,3 +132,35 @@ footer{text-align:center;padding:6px 0 18px}
   .shell{padding:14px}.posform{grid-template-columns:1fr 1fr}.kpi strong{font-size:22px}
   #chart{height:300px}
 }
+
+/* ---- views, tabs, backtest ---- */
+[hidden]{display:none!important}
+#view-dash,#view-bt{display:flex;flex-direction:column;gap:20px}
+.tabs{display:flex;gap:4px;padding:4px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--border)}
+.tab{background:none;border:0;color:var(--muted);padding:6px 16px;border-radius:99px;font:inherit;font-weight:600;cursor:pointer;transition:.15s}
+.tab.on{background:linear-gradient(135deg,rgba(139,140,255,.6),rgba(139,140,255,.28));color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.btctl{padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.btctl .inline{align-items:flex-end}
+label{display:grid;gap:4px}
+select{background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:12px;font:inherit;outline:none}
+select option{background:#141b3a}
+.verdict{padding:16px 20px;display:flex;gap:14px;align-items:flex-start;border-left:4px solid var(--warn)}
+.verdict.good{border-left-color:var(--up)}.verdict.bad{border-left-color:var(--down)}
+.verdict b{display:block;margin-bottom:2px}
+.btgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.btsec{padding:16px 20px}
+.btsec h3{font-size:13px;color:var(--muted);font-weight:500;margin-bottom:10px;display:flex;justify-content:space-between}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.m{padding:9px 11px;border-radius:12px;background:rgba(255,255,255,.06)}
+.m span{display:block;font-size:11px;color:var(--muted)}.m b{font-size:16px;font-variant-numeric:tabular-nums}
+#bt-chart{height:340px;border-radius:14px;overflow:hidden}
+.btcols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.btcols .glass{padding:18px 20px}
+.sweep td,.sweep th{padding:8px 10px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:rot .8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes rot{to{transform:rotate(360deg)}}
+.tablewrap.short{max-height:340px}
+#bt-body{display:flex;flex-direction:column;gap:20px}
+@media(max-width:1100px){.btgrid,.btcols{grid-template-columns:1fr}}
+.sw{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.legend .l:before{display:none}.legend .l{padding-left:0}

@@ -65,3 +65,25 @@ def quotes(symbols: List[str]) -> Dict[str, dict]:
                 out[s] = {"price": p, "prev_close": pc, "change": p - pc,
                           "change_pct": (p / pc - 1) * 100, "ts": h.index[-1].isoformat()}
     return out
+
+
+_hist_long: Dict[str, tuple] = {}
+LONG_TTL = 6 * 3600
+
+
+def history_long(symbol: str, years: int = 5) -> Optional[pd.DataFrame]:
+    """Multi-year daily bars with indicators, for backtesting (cached)."""
+    key = f"{symbol}:{years}"
+    hit = _hist_long.get(key)
+    if hit and time.time() - hit[0] < LONG_TTL:
+        return hit[1]
+    try:
+        df = yf.Ticker(symbol).history(period=f"{years}y", interval="1d", auto_adjust=True)
+    except Exception:
+        return hit[1] if hit else None
+    if df is None or len(df) < 260:
+        return hit[1] if hit else None
+    df.index = df.index.tz_localize(None)
+    df = enrich(df)
+    _hist_long[key] = (time.time(), df)
+    return df

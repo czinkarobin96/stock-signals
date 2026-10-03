@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import data, db
+from . import backtest, data, db
 from .signals import exit_check, score
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -174,6 +174,39 @@ def api_chart(symbol: str, days: int = 180) -> dict:
         "ema20": line("ema20"), "ema50": line("ema50"), "ema200": line("ema200"),
         "signal": state["signals"].get(symbol) or score(data.history(symbol)),
     }
+
+
+_bt_cache: Dict[tuple, dict] = {}
+
+
+async def _run_backtest(threshold: int, years: int) -> dict:
+    key = (tuple(watchlist()), threshold, years)
+    if key not in _bt_cache:
+        res = await asyncio.to_thread(backtest.run, list(key[0]), threshold, years)
+        if res is None:
+            raise HTTPException(502, "Nem sikerült historikus adatot letölteni")
+        _bt_cache[key] = res
+    return _bt_cache[key]
+
+
+@app.get("/api/backtest")
+async def api_backtest(threshold: int = 4, years: int = 5) -> dict:
+    if not 1 <= threshold <= 6 or not 2 <= years <= 10:
+        raise HTTPException(400, "Érvénytelen paraméter")
+    return await _run_backtest(threshold, years)
+
+
+@app.get("/api/backtest/sweep")
+async def api_backtest_sweep(years: int = 5) -> list:
+    out = []
+    for t in (3, 4, 5):
+        r = await _run_backtest(t, years)
+        out.append({
+            "threshold": t,
+            "all": r["stats"]["all"], "out_of_sample": r["stats"]["out_of_sample"],
+            "exposure": r["exposure"],
+        })
+    return out
 
 
 class WatchItem(BaseModel):

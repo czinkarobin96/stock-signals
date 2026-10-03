@@ -203,3 +203,112 @@ $("#add-pos").addEventListener("submit", async (e) => {
 
 initChart();
 connect();
+
+// ================= BACKTEST =================
+const f1 = (n) => (n == null ? "–" : (n * 100).toFixed(1) + "%");
+const f2 = (n) => (n == null ? "∞" : n.toFixed(2));
+let btChart = null, btSeries = {};
+
+document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === b));
+  $("#view-dash").hidden = b.dataset.view !== "dash";
+  $("#view-bt").hidden = b.dataset.view !== "bt";
+  if (b.dataset.view === "dash" && chart) setTimeout(() => chart.timeScale().fitContent(), 50);
+}));
+$("#bt-run").addEventListener("click", runBacktest);
+
+function metric(label, val, c = "") { return `<div class="m"><span>${label}</span><b class="${c}">${val}</b></div>`; }
+
+function secCard(title, s, extra = "") {
+  const t = s.trades, e = s.equity;
+  return `<div class="glass btsec"><h3><span>${title}</span><span>${extra}</span></h3><div class="metrics">
+    ${metric("Összes hozam", f1(e.total), cls(e.total))}
+    ${metric("Évesített (CAGR)", f1(e.cagr), cls(e.cagr))}
+    ${metric("Max drawdown", f1(e.maxdd), "down")}
+    ${metric("Sharpe", f2(e.sharpe))}
+    ${metric("Ügyletek", t.n)}
+    ${metric("Nyerő arány", f1(t.win_rate))}
+    ${metric("Profit factor", f2(t.profit_factor), t.profit_factor > 1.2 ? "up" : t.profit_factor < 1 ? "down" : "")}
+    ${metric("Átl. ügylet", f1(t.avg), cls(t.avg))}
+  </div></div>`;
+}
+
+function verdictBox(r) {
+  const o = r.stats.out_of_sample, bh = r.benchmark.buyhold;
+  const pf = o.trades.profit_factor ?? 99;
+  let kind = "", head, body;
+  if (pf >= 1.3 && o.equity.sharpe >= 0.8) { kind = "good"; head = "Biztató, de még nem bizonyíték"; body = "A kontroll időszakon is nyereséges a szabályrendszer."; }
+  else if (pf < 1.1) { kind = "bad"; head = "Nincs bizonyított előny a kontroll időszakon"; body = `A kontroll (out-of-sample) időszakon a profit factor ${f2(o.trades.profit_factor)}, ami gyakorlatilag nulla várható érték költségek után. Éles pénzzel ezt a szabálykészletet még nem érdemes követni, finomítani kell.`; }
+  else { head = "Gyenge-közepes előny"; body = "A kontroll időszakon pozitív, de vékony az edge."; }
+  const lag = r.stats.all.equity.total < bh.total
+    ? ` A passzív vásárlás-és-tartás (${f1(bh.total)}) ugyanezen a mintán többet hozott, a stratégia (${f1(r.stats.all.equity.total)}) viszont kisebb drawdownnal (${f1(r.stats.all.equity.maxdd)} vs ${f1(bh.maxdd)}) és ${f1(r.exposure)} piaci kitettséggel működött.` : "";
+  return `<div class="glass verdict ${kind}"><div><b>${head}</b><span class="muted">${body}${lag}
+    <br><i>Figyelem: a watchlist ma is népszerű mega-capekből áll (túlélési torzítás: a buy&hold itt kedvezőbbnek látszik a valóságnál), a minta 1 piaci ciklus.</i></span></div></div>`;
+}
+
+async function runBacktest() {
+  const btn = $("#bt-run"), th = $("#bt-th").value, yrs = $("#bt-years").value;
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span>Fut…`;
+  $("#bt-body").innerHTML = `<div class="glass empty"><span class="spin"></span>Szimuláció fut ${snap?.watchlist.length || ""} tickeren… (első alkalommal ~10–20 mp)</div>`;
+  try {
+    const r = await fetch(`/api/backtest?threshold=${th}&years=${yrs}`);
+    if (!r.ok) throw new Error((await r.json()).detail || "Hiba");
+    const res = await r.json();
+    renderBacktest(res);
+    loadSweep(yrs);
+  } catch (e) {
+    $("#bt-body").innerHTML = `<div class="glass empty">Hiba: ${esc(e.message)}</div>`;
+  } finally { btn.disabled = false; btn.textContent = "Futtatás"; }
+}
+
+function renderBacktest(r) {
+  const st = r.stats;
+  $("#bt-body").innerHTML = `
+    ${verdictBox(r)}
+    <div class="btgrid">
+      ${secCard("Teljes időszak", st.all, r.period[0] + " → " + r.period[1])}
+      ${secCard("Tanuló (in-sample)", st.in_sample, "→ " + r.split_date)}
+      ${secCard("Kontroll (out-of-sample)", st.out_of_sample, r.split_date + " →")}
+    </div>
+    <div class="glass" style="padding:18px 20px">
+      <div class="cardhead"><h2>Tőkegörbe (100 = kezdés)</h2>
+        <div class="legend"><span class="l" style="--c:#8b8cff"><i class="sw" style="background:#8b8cff"></i>Stratégia</span><span class="l"><i class="sw" style="background:#fbbf24"></i>Buy&amp;hold watchlist</span><span class="l"><i class="sw" style="background:#9aa4c7"></i>SPY</span></div></div>
+      <div id="bt-chart"></div>
+    </div>
+    <div class="glass" id="sweep-card" style="padding:18px 20px"><div class="cardhead"><h2>Küszöb-összehasonlítás</h2></div><div class="muted"><span class="spin"></span>Számolás…</div></div>
+    <div class="btcols">
+      <div class="glass"><div class="cardhead"><h2>Tickerenként</h2></div><div class="tablewrap short"><table><thead><tr><th>Ticker</th><th class="r">Ügylet</th><th class="r">Nyerő</th><th class="r">Stratégia</th><th class="r">Buy&amp;hold</th></tr></thead><tbody>
+        ${r.per_symbol.map((p) => `<tr style="cursor:default"><td class="sym">${esc(p.symbol)}</td><td class="r">${p.n}</td><td class="r">${f1(p.win_rate)}</td><td class="r ${cls(p.strategy)}">${f1(p.strategy)}</td><td class="r ${cls(p.buyhold)}">${f1(p.buyhold)}</td></tr>`).join("")}
+      </tbody></table></div></div>
+      <div class="glass"><div class="cardhead"><h2>Utolsó ügyletek</h2></div><div class="tablewrap short"><table><thead><tr><th>Ticker</th><th>Belépő</th><th>Kilépő</th><th class="r">Hozam</th><th>Ok</th></tr></thead><tbody>
+        ${r.trades.slice(0, 60).map((t) => `<tr style="cursor:default"><td class="sym">${esc(t.symbol)}</td><td>${t.entry_date.slice(2)}</td><td>${t.exit_date.slice(2)}</td><td class="r ${cls(t.ret)}">${pct(t.ret * 100)}</td><td class="muted small">${esc(t.reason)}</td></tr>`).join("")}
+      </tbody></table></div></div>
+    </div>`;
+  drawEquity(r.curves);
+}
+
+function drawEquity(c) {
+  if (btChart) { btChart.remove(); btChart = null; }
+  btChart = LightweightCharts.createChart($("#bt-chart"), {
+    autoSize: true,
+    layout: { background: { color: "transparent" }, textColor: "#9aa4c7", fontFamily: "inherit" },
+    grid: { vertLines: { color: "rgba(255,255,255,.05)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
+    rightPriceScale: { borderColor: "rgba(255,255,255,.12)" }, timeScale: { borderColor: "rgba(255,255,255,.12)" },
+  });
+  const add = (data, color, w) => { const s = btChart.addLineSeries({ color, lineWidth: w, priceLineVisible: false }); s.setData(data); return s; };
+  add(c.buyhold, "#fbbf24", 1); if (c.spy.length) add(c.spy, "#9aa4c7", 1); add(c.strategy, "#8b8cff", 3);
+  btChart.timeScale().fitContent();
+  requestAnimationFrame(() => btChart.timeScale().fitContent());
+  setTimeout(() => btChart && btChart.timeScale().fitContent(), 300);
+}
+
+async function loadSweep(yrs) {
+  try {
+    const rows = await (await fetch(`/api/backtest/sweep?years=${yrs}`)).json();
+    const el = $("#sweep-card"); if (!el) return;
+    el.innerHTML = `<div class="cardhead"><h2>Küszöb-összehasonlítás</h2><span class="muted small">Magasabb küszöb = szigorúbb, ritkább BUY</span></div>
+      <div class="tablewrap"><table class="sweep"><thead><tr><th>Küszöb</th><th class="r">Ügylet</th><th class="r">Nyerő</th><th class="r">Profit factor</th><th class="r">Hozam (össz.)</th><th class="r">Max DD</th><th class="r">Sharpe</th><th class="r">Kontroll PF</th><th class="r">Kontroll hozam</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr style="cursor:default"><td class="sym">≥ ${x.threshold}</td><td class="r">${x.all.trades.n}</td><td class="r">${f1(x.all.trades.win_rate)}</td><td class="r">${f2(x.all.trades.profit_factor)}</td><td class="r ${cls(x.all.equity.total)}">${f1(x.all.equity.total)}</td><td class="r down">${f1(x.all.equity.maxdd)}</td><td class="r">${f2(x.all.equity.sharpe)}</td><td class="r"><b>${f2(x.out_of_sample.trades.profit_factor)}</b></td><td class="r ${cls(x.out_of_sample.equity.total)}">${f1(x.out_of_sample.equity.total)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  } catch (e) { /* non-critical */ }
+}
